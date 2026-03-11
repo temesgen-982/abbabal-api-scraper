@@ -1,0 +1,46 @@
+name: Fetch Proverbs Setup
+on:
+  schedule:
+    # 7:00 AM, 3:00 PM, 11:00 PM UTC
+    - cron: "0 7,15,23 * * *"
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install telethon python-dotenv
+
+      - name: Setup Secrets and Session
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          TG_SESSION: ${{ secrets.TG_SESSION }}
+        run: |
+          echo "TG_API_ID=${TG_API_ID}" >> .env
+          echo "TG_API_HASH=${TG_API_HASH}" >> .env
+          # Decode the base64 session secret back into a file
+          echo "${TG_SESSION}" | base64 --decode > ababaloch.session
+
+      - name: Fetch Updates
+        run: python main.py
+
+      - name: Commit and Push Data
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add data/proverbs.db
+          # Only commit if there are changes
+          git diff --quiet && git diff --staged --quiet || git commit -m "chore: fetch latest proverbs [skip ci]"
+          git push
