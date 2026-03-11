@@ -7,9 +7,9 @@ A modular Telegram scraper designed to fetch and maintain a dataset of proverbs 
 - `main.py`: The entrypoint for automated updates (cron job).
 - `fetch_history.py`: Script to retrieve the entire message history from the channel.
 - `fetch_updates.py`: Incremental scraper that only fetches messages newer than the last saved ID.
-- `database.py`: Handles reading/writing to the JSONL dataset.
+- `database.py`: Handles reading/writing to the SQLite database.
 - `parser.py`: Cleans and formats raw message text.
-- `data/proverbs.jsonl`: The generated dataset (one JSON object per line).
+- `data/proverbs.db`: The generated SQLite database.
 
 ## 🚀 Getting Started
 
