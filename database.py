@@ -1,54 +1,85 @@
-import json
+import sqlite3
 import os
 
-DATA_FILE = os.path.join(os.path.dirname(__file__), 'data', 'proverbs.jsonl')
+DB_FILE = os.path.join(os.path.dirname(__file__), 'data', 'proverbs.db')
+
+def get_connection():
+    os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
+    return sqlite3.connect(DB_FILE)
+
+def init_db():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS proverbs (
+            id INTEGER PRIMARY KEY,
+            date TEXT,
+            text TEXT,
+            views INTEGER,
+            forwards INTEGER
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+# Initialize the database when the module is imported
+init_db()
 
 def save_proverbs(proverbs, append=True):
     """
-    Saves a list of proverb dictionaries to the jsonl file.
+    Saves a list of proverb dictionaries to the SQLite database.
     :param proverbs: List of dicts with message data.
-    :param append: If True, appends to the file. If False, overwrites.
+    :param append: Ignored for SQLite, kept for signature compatibility.
     """
-    mode = 'a' if append else 'w'
-    
-    # Ensure directory exists (just in case)
-    os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
-    
-    with open(DATA_FILE, mode, encoding='utf-8') as f:
-        for entry in proverbs:
-            f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        # Using context manager for automatic commit/rollback
+        with conn:
+            for entry in proverbs:
+                msg_id = entry.get('id')
+                # Fail fast to prevent auto-increment issues with NULL primary keys
+                if msg_id is None or not isinstance(msg_id, int):
+                    raise ValueError(f"Invalid or missing 'id' in entry: {entry}")
+                    
+                cursor.execute('''
+                    INSERT OR IGNORE INTO proverbs (id, date, text, views, forwards)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (
+                    msg_id,
+                    entry.get('date'),
+                    entry.get('text'),
+                    entry.get('views', 0),
+                    entry.get('forwards', 0)
+                ))
+    finally:
+        conn.close()
 
 def get_last_message_id():
     """
-    Reads the last message ID from the jsonl file.
-    Returns 0 if the file doesn't exist or is empty.
+    Reads the last message ID from the database.
+    Returns 0 if the table is empty.
     """
-    if not os.path.exists(DATA_FILE):
-        return 0
-    
-    last_id = 0
+    conn = get_connection()
     try:
-        with open(DATA_FILE, 'r', encoding='utf-8') as f:
-            for line in f:
-                if line.strip():
-                    try:
-                        entry = json.loads(line)
-                        last_id = max(last_id, entry.get('id', 0))
-                    except json.JSONDecodeError:
-                        continue
-    except Exception as e:
-        print(f"Error reading last message ID: {e}")
-        
-    return last_id
+        cursor = conn.cursor()
+        cursor.execute('SELECT MAX(id) FROM proverbs')
+        result = cursor.fetchone()[0]
+        return result if result is not None else 0
+    finally:
+        conn.close()
 
 def get_all_proverbs():
     """
-    Yields all proverbs from the file as dictionaries.
+    Yields all proverbs from the database as dictionaries.
     """
-    if not os.path.exists(DATA_FILE):
-        return
-    
-    with open(DATA_FILE, 'r', encoding='utf-8') as f:
-        for line in f:
-            if line.strip():
-                yield json.loads(line)
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, date, text, views, forwards FROM proverbs ORDER BY id ASC')
+        
+        columns = [col[0] for col in cursor.description]
+        for row in cursor.fetchall():
+            yield dict(zip(columns, row))
+    finally:
+        conn.close()
