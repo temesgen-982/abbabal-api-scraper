@@ -1,4 +1,4 @@
-# Abbabaloch Proverbs API
+# Abbabal API Scraper
 
 A modular Telegram scraper designed to fetch and maintain a dataset of proverbs from the `@ababaloch` channel.
 
