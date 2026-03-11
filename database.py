@@ -32,22 +32,23 @@ def save_proverbs(proverbs, append=True):
     :param append: Ignored for SQLite, kept for signature compatibility.
     """
     conn = get_connection()
-    cursor = conn.cursor()
-    
-    for entry in proverbs:
-        cursor.execute('''
-            INSERT OR IGNORE INTO proverbs (id, date, text, views, forwards)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (
-            entry.get('id'),
-            entry.get('date'),
-            entry.get('text'),
-            entry.get('views', 0),
-            entry.get('forwards', 0)
-        ))
-        
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        # Using context manager for automatic commit/rollback
+        with conn:
+            for entry in proverbs:
+                cursor.execute('''
+                    INSERT OR IGNORE INTO proverbs (id, date, text, views, forwards)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (
+                    entry.get('id'),
+                    entry.get('date'),
+                    entry.get('text'),
+                    entry.get('views', 0),
+                    entry.get('forwards', 0)
+                ))
+    finally:
+        conn.close()
 
 def get_last_message_id():
     """
@@ -55,23 +56,25 @@ def get_last_message_id():
     Returns 0 if the table is empty.
     """
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT MAX(id) FROM proverbs')
-    result = cursor.fetchone()[0]
-    conn.close()
-    
-    return result if result is not None else 0
+    try:
+        cursor = conn.cursor()
+        cursor.execute('SELECT MAX(id) FROM proverbs')
+        result = cursor.fetchone()[0]
+        return result if result is not None else 0
+    finally:
+        conn.close()
 
 def get_all_proverbs():
     """
     Yields all proverbs from the database as dictionaries.
     """
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT id, date, text, views, forwards FROM proverbs ORDER BY id ASC')
-    
-    columns = [col[0] for col in cursor.description]
-    for row in cursor.fetchall():
-        yield dict(zip(columns, row))
+    try:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, date, text, views, forwards FROM proverbs ORDER BY id ASC')
         
-    conn.close()
+        columns = [col[0] for col in cursor.description]
+        for row in cursor.fetchall():
+            yield dict(zip(columns, row))
+    finally:
+        conn.close()
