@@ -37,11 +37,16 @@ def save_proverbs(proverbs, append=True):
         # Using context manager for automatic commit/rollback
         with conn:
             for entry in proverbs:
+                msg_id = entry.get('id')
+                # Fail fast to prevent auto-increment issues with NULL primary keys
+                if msg_id is None or not isinstance(msg_id, int):
+                    raise ValueError(f"Invalid or missing 'id' in entry: {entry}")
+                    
                 cursor.execute('''
                     INSERT OR IGNORE INTO proverbs (id, date, text, views, forwards)
                     VALUES (?, ?, ?, ?, ?)
                 ''', (
-                    entry.get('id'),
+                    msg_id,
                     entry.get('date'),
                     entry.get('text'),
                     entry.get('views', 0),
