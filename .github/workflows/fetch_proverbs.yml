@@ -1,8 +1,8 @@
 name: Fetch Proverbs Setup
 on:
   schedule:
-    # 7:00 AM, 3:00 PM (15:00), 11:00 PM (23:00) UTC
-    - cron: "0 7,15,23 * * *"
+    # 7:00 AM, 15:00 PM, 23:00 PM (UTC + 3)
+    - cron: "0 4,12,20 * * *"
   workflow_dispatch: # Allows manual trigger
 
 # Limit permissions to what is strictly necessary
