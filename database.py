@@ -16,7 +16,15 @@ def init_db():
             date TEXT,
             text TEXT,
             views INTEGER,
-            forwards INTEGER
+            forwards INTEGER,
+            english_translation TEXT DEFAULT '',
+            amharic_meaning TEXT DEFAULT '',
+            english_meaning TEXT DEFAULT '',
+            translation_source TEXT DEFAULT '',
+            meaning_source TEXT DEFAULT '',
+            confidence REAL DEFAULT 0.0,
+            needs_review REAL DEFAULT 0.0,
+            updated_at TEXT DEFAULT ''
         )
     ''')
     conn.commit()
@@ -76,7 +84,7 @@ def get_all_proverbs():
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute('SELECT id, date, text, views, forwards FROM proverbs ORDER BY id ASC')
+        cursor.execute('SELECT * FROM proverbs ORDER BY id ASC')
         
         columns = [col[0] for col in cursor.description]
         for row in cursor.fetchall():
