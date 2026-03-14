@@ -1,8 +1,9 @@
 name: Process Proverbs with AI
 on:
   schedule:
-    # Run 3 times daily: 02:00, 10:00, 18:00 UTC (05:00, 13:00, 21:00 UTC+3)
-    - cron: "0 2,10,18 * * *"
+    # Run 10 times daily: 00:00, 02:00, 05:00, 07:00, 10:00, 13:00, 16:00, 18:00, 21:00, 23:00 UTC
+    # UTC+3: 03:00, 05:00, 08:00, 10:00, 13:00, 16:00, 19:00, 21:00, 00:00 (next day), 02:00 (next day)
+    - cron: "0 0,2,5,7,10,13,16,18,21,23 * * *"
   workflow_dispatch: # Allows manual trigger
 
 concurrency:
