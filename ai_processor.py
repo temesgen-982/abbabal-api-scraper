@@ -23,7 +23,6 @@ def model_name_to_source(model_name):
     return f"Gemini {model_name.replace('-', ' ').title()}"
 
 MODEL_SOURCE = model_name_to_source(MODEL_NAME)
-model = genai.GenerativeModel(MODEL_NAME)
 
 BATCH_SIZE = 50
 TARGET_RPM = 15
@@ -53,6 +52,11 @@ If you find a proverb confusing or ambiguous, lower the confidence score and set
 CRITICAL: Do not hallucinate new IDs. Only return objects for the IDs provided in the input array.
 """
 
+model = genai.GenerativeModel(
+    MODEL_NAME,
+    system_instruction=SYSTEM_INSTRUCTION,
+)
+
 def process_batch(proverbs_batch):
     print(f"Sending batch of {len(proverbs_batch)} proverbs to Gemini...")
     expected_ids = {p['id'] for p in proverbs_batch}
@@ -60,7 +64,7 @@ def process_batch(proverbs_batch):
     # Prepare the payload (just IDs and the text to save tokens)
     payload = [{"id": p['id'], "text": p['text']} for p in proverbs_batch]
     
-    prompt = f"{SYSTEM_INSTRUCTION}\n\nHere is the input array:\n{json.dumps(payload, ensure_ascii=False)}"
+    prompt = f"Here is the input array:\n{json.dumps(payload, ensure_ascii=False)}"
     
     try_count = 0
     while True:
