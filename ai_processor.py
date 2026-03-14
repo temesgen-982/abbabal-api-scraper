@@ -66,89 +66,83 @@ def process_batch(proverbs_batch):
     
     prompt = f"Here is the input array:\n{json.dumps(payload, ensure_ascii=False)}"
     
-    try_count = 0
-    while True:
-        try:
-            # We enforce a strict JSON application response format
-            response = model.generate_content(
-                prompt,
-                generation_config=genai.GenerationConfig(
-                    response_mime_type="application/json"
-                )
+    try:
+        # We enforce a strict JSON application response format
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json"
             )
-            
-            # Parse the JSON string Gemini returns
-            ai_results = json.loads(response.text)
+        )
 
-            if not isinstance(ai_results, list):
-                print("Error: Gemini response is not a JSON array. Failing batch.")
-                return None
+        # Parse the JSON string Gemini returns
+        ai_results = json.loads(response.text)
 
-            validated_results = []
-            returned_ids = set()
-            unknown_ids = []
-            duplicate_ids = []
+        if not isinstance(ai_results, list):
+            print("Error: Gemini response is not a JSON array. Failing batch.")
+            return None
 
-            for result in ai_results:
-                if not isinstance(result, dict):
-                    unknown_ids.append("<non-object-item>")
-                    continue
+        validated_results = []
+        returned_ids = set()
+        unknown_ids = []
+        duplicate_ids = []
 
-                result_id = result.get('id')
-                if isinstance(result_id, str):
-                    try:
-                        result_id = int(result_id)
-                        result['id'] = result_id
-                    except ValueError:
-                        pass
+        for result in ai_results:
+            if not isinstance(result, dict):
+                unknown_ids.append("<non-object-item>")
+                continue
 
-                if result_id not in expected_ids:
-                    unknown_ids.append(result_id)
-                    continue
+            result_id = result.get('id')
+            if isinstance(result_id, str):
+                try:
+                    result_id = int(result_id)
+                    result['id'] = result_id
+                except ValueError:
+                    pass
 
-                if result_id in returned_ids:
-                    duplicate_ids.append(result_id)
-                    continue
+            if result_id not in expected_ids:
+                unknown_ids.append(result_id)
+                continue
 
-                # Enforce provenance consistency with the configured model.
-                result['translation_source'] = MODEL_SOURCE
-                result['meaning_source'] = MODEL_SOURCE
+            if result_id in returned_ids:
+                duplicate_ids.append(result_id)
+                continue
 
-                validated_results.append(result)
-                returned_ids.add(result_id)
+            # Enforce provenance consistency with the configured model.
+            result['translation_source'] = MODEL_SOURCE
+            result['meaning_source'] = MODEL_SOURCE
 
-            if unknown_ids:
-                preview = unknown_ids[:10]
-                print(f"WARNING: Ignoring {len(unknown_ids)} unexpected response item(s) with unknown IDs/items: {preview}")
+            validated_results.append(result)
+            returned_ids.add(result_id)
 
-            if duplicate_ids:
-                preview = duplicate_ids[:10]
-                print(f"WARNING: Ignoring {len(duplicate_ids)} duplicate response item(s) for IDs: {preview}")
+        if unknown_ids:
+            preview = unknown_ids[:10]
+            print(f"WARNING: Ignoring {len(unknown_ids)} unexpected response item(s) with unknown IDs/items: {preview}")
 
-            missing_ids = sorted(expected_ids - returned_ids)
-            if missing_ids:
-                preview = missing_ids[:10]
-                print(f"ERROR: Gemini response is missing {len(missing_ids)} expected ID(s): {preview}. Failing batch to avoid partial/corrupt updates.")
-                return None
+        if duplicate_ids:
+            preview = duplicate_ids[:10]
+            print(f"WARNING: Ignoring {len(duplicate_ids)} duplicate response item(s) for IDs: {preview}")
 
-            if not validated_results:
-                print("Error: No valid items remained after response validation. Failing batch.")
-                return None
+        missing_ids = sorted(expected_ids - returned_ids)
+        if missing_ids:
+            preview = missing_ids[:10]
+            print(f"ERROR: Gemini response is missing {len(missing_ids)} expected ID(s): {preview}. Failing batch to avoid partial/corrupt updates.")
+            return None
 
-            return validated_results
-            
-        except Exception as e:
-            error_msg = str(e)
-            if "429" in error_msg or "Quota exceeded" in error_msg:
-                print(f"\n[RATE LIMIT HIT] Google API requested a pause. Sleeping for 60 seconds before retrying this batch...")
-                time.sleep(60)
-                try_count += 1
-                if try_count > 5:
-                    print("Failed after 5 rate limit retries. Aborting.")
-                    return None
-            else:
-                print(f"Error calling Gemini API: {e}")
-                return None
+        if not validated_results:
+            print("Error: No valid items remained after response validation. Failing batch.")
+            return None
+
+        return validated_results
+
+    except Exception as e:
+        error_msg = str(e)
+        if "429" in error_msg or "Quota exceeded" in error_msg:
+            print("[RATE LIMIT HIT] Quota/rate-limit error returned by Gemini. Stopping this run immediately.")
+            return None
+
+        print(f"Error calling Gemini API: {e}")
+        return None
 
 def main():
     print("Starting AI augmentation processor...")
