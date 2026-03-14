@@ -1,7 +1,6 @@
 import os
 import time
 import json
-from typing import TypedDict
 from dotenv import load_dotenv
 import google.generativeai as genai
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -26,16 +25,6 @@ def model_name_to_source(model_name):
 
 MODEL_SOURCE = model_name_to_source(MODEL_NAME)
 
-class ProverbResultResponse(TypedDict):
-    id: int
-    english_translation: str
-    amharic_meaning: str
-    english_meaning: str
-    translation_source: str
-    meaning_source: str
-    confidence: float
-    needs_review: float
-
 
 class ProverbResultModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -48,6 +37,18 @@ class ProverbResultModel(BaseModel):
     meaning_source: str
     confidence: float = Field(ge=0.0, le=1.0)
     needs_review: float = Field(ge=0.0, le=1.0)
+
+
+def build_response_schema(model_class):
+    item_schema = model_class.model_json_schema()
+    item_schema.pop("title", None)
+    return {
+        "type": "array",
+        "items": item_schema,
+    }
+
+
+RESPONSE_SCHEMA = build_response_schema(ProverbResultModel)
 
 BATCH_SIZE = 50
 TARGET_RPM = 15
@@ -97,7 +98,7 @@ def process_batch(proverbs_batch):
             prompt,
             generation_config=genai.GenerationConfig(
                 response_mime_type="application/json",
-                response_schema=list[ProverbResultResponse],
+                response_schema=RESPONSE_SCHEMA,
             )
         )
 
