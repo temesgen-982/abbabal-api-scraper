@@ -43,6 +43,10 @@ jobs:
             exit 1
           fi
 
+      - name: Sync with latest remote branch
+        run: |
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+
       - name: Process Proverbs with AI
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -60,6 +64,6 @@ jobs:
             exit 0
           fi
 
-          git pull --rebase origin "${GITHUB_REF_NAME}"
           git commit -m "chore: process proverbs with AI [skip ci]"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
           git push origin "${GITHUB_REF_NAME}"
