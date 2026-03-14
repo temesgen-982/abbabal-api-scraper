@@ -26,7 +26,9 @@ MODEL_SOURCE = model_name_to_source(MODEL_NAME)
 model = genai.GenerativeModel(MODEL_NAME)
 
 BATCH_SIZE = 50
-SLEEP_TIME_SECONDS = 4 # Wait 4s to stay under 15 RPM limit
+TARGET_RPM = 15
+# Ceiling division keeps the effective request rate at or below TARGET_RPM.
+SLEEP_TIME_SECONDS = (60 + TARGET_RPM - 1) // TARGET_RPM
 
 SYSTEM_INSTRUCTION = f"""
 You are an expert translator specializing in Amharic proverbs and idioms. 
@@ -176,8 +178,8 @@ def main():
             print("Failed to get a valid response from Gemini for this batch. Stopping.")
             break
             
-        # 4. Sleep to respect the 5 RPM rate limit
-        print(f"Sleeping for {SLEEP_TIME_SECONDS} seconds to respect API rate limits...")
+        # 4. Sleep to respect the TARGET_RPM limit
+        print(f"Sleeping for {SLEEP_TIME_SECONDS} seconds to respect the <= {TARGET_RPM} RPM limit...")
         time.sleep(SLEEP_TIME_SECONDS)
         
     print(f"\nFinished processing. Total proverbs augmented this run: {total_processed}")
