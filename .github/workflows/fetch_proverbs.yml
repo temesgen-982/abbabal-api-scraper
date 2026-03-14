@@ -5,6 +5,10 @@ on:
     - cron: "0 4,12,20 * * *"
   workflow_dispatch: # Allows manual trigger
 
+concurrency:
+  group: proverbs-db-write
+  cancel-in-progress: false
+
 # Limit permissions to what is strictly necessary
 permissions:
   contents: write

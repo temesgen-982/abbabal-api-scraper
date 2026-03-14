@@ -91,3 +91,57 @@ def get_all_proverbs():
             yield dict(zip(columns, row))
     finally:
         conn.close()
+
+def get_unprocessed_proverbs(limit=75):
+    """
+    Fetches proverbs that do not have an english_translation yet.
+    Returns them as a list of dictionaries.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM proverbs WHERE english_translation = '' ORDER BY id ASC LIMIT ?", (limit,))
+        
+        columns = [col[0] for col in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+def update_proverbs_ai_data(ai_results):
+    """
+    Updates the database with the AI-generated translations and meanings.
+    :param ai_results: List of dictionaries containing the parsed AI data and original message ID.
+    Example: [{"id": 1, "english_translation": "...", "confidence": 0.95...}]
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        with conn:
+            for result in ai_results:
+                msg_id = result.get('id')
+                if msg_id is None:
+                    continue
+                    
+                cursor.execute('''
+                    UPDATE proverbs
+                    SET english_translation = ?,
+                        amharic_meaning = ?,
+                        english_meaning = ?,
+                        translation_source = ?,
+                        meaning_source = ?,
+                        confidence = ?,
+                        needs_review = ?,
+                        updated_at = datetime('now')
+                    WHERE id = ?
+                ''', (
+                    result.get('english_translation', ''),
+                    result.get('amharic_meaning', ''),
+                    result.get('english_meaning', ''),
+                    result.get('translation_source', ''),
+                    result.get('meaning_source', ''),
+                    result.get('confidence', 0.0),
+                    result.get('needs_review', 0.0),
+                    msg_id
+                ))
+    finally:
+        conn.close()
