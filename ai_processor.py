@@ -41,9 +41,56 @@ class ProverbResultModel(BaseModel):
 
 def build_response_schema(model_class):
     item_schema = model_class.model_json_schema()
-    item_schema.pop("title", None)
+
+    allowed_keys = {
+        "type",
+        "format",
+        "description",
+        "nullable",
+        "enum",
+        "items",
+        "maxItems",
+        "minItems",
+        "properties",
+        "required",
+    }
+    type_map = {
+        "string": "STRING",
+        "number": "NUMBER",
+        "integer": "INTEGER",
+        "boolean": "BOOLEAN",
+        "array": "ARRAY",
+        "object": "OBJECT",
+        "null": "NULL",
+    }
+
+    def sanitize_schema_node(node):
+        if isinstance(node, list):
+            return [sanitize_schema_node(item) for item in node]
+
+        if not isinstance(node, dict):
+            return node
+
+        sanitized = {}
+        for key, value in node.items():
+            if key not in allowed_keys:
+                continue
+
+            if key == "type" and isinstance(value, str):
+                sanitized[key] = type_map.get(value.lower(), value)
+            elif key == "properties" and isinstance(value, dict):
+                sanitized[key] = {
+                    prop_name: sanitize_schema_node(prop_schema)
+                    for prop_name, prop_schema in value.items()
+                }
+            else:
+                sanitized[key] = sanitize_schema_node(value)
+
+        return sanitized
+
+    item_schema = sanitize_schema_node(item_schema)
     return {
-        "type": "array",
+        "type": "ARRAY",
         "items": item_schema,
     }
 
