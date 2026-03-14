@@ -1,2 +1,3 @@
 python-dotenv==1.2.2
 Telethon==1.42.0
+google-generativeai==0.8.5
