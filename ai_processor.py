@@ -1,7 +1,6 @@
 import os
 import time
 import json
-import asyncio
 from dotenv import load_dotenv
 import google.generativeai as genai
 
@@ -49,11 +48,12 @@ For each ID provided, you must return an object with the following structure:
 ]
 The `confidence` score should be a float between 0.0 (utterly unsure) and 1.0 (perfectly confident).
 If you find a proverb confusing or ambiguous, lower the confidence score and set `needs_review` to 1.0.
-CRITICAL: Do not hallucinative new IDs. Only return objects for the IDs provided in the input array.
+CRITICAL: Do not hallucinate new IDs. Only return objects for the IDs provided in the input array.
 """
 
 def process_batch(proverbs_batch):
     print(f"Sending batch of {len(proverbs_batch)} proverbs to Gemini...")
+    expected_ids = {p['id'] for p in proverbs_batch}
     
     # Prepare the payload (just IDs and the text to save tokens)
     payload = [{"id": p['id'], "text": p['text']} for p in proverbs_batch]
@@ -74,16 +74,62 @@ def process_batch(proverbs_batch):
             # Parse the JSON string Gemini returns
             ai_results = json.loads(response.text)
 
-            # Enforce provenance consistency with the configured model.
+            if not isinstance(ai_results, list):
+                print("Error: Gemini response is not a JSON array. Failing batch.")
+                return None
+
+            validated_results = []
+            returned_ids = set()
+            unknown_ids = []
+            duplicate_ids = []
+
             for result in ai_results:
+                if not isinstance(result, dict):
+                    unknown_ids.append("<non-object-item>")
+                    continue
+
+                result_id = result.get('id')
+                if isinstance(result_id, str):
+                    try:
+                        result_id = int(result_id)
+                        result['id'] = result_id
+                    except ValueError:
+                        pass
+
+                if result_id not in expected_ids:
+                    unknown_ids.append(result_id)
+                    continue
+
+                if result_id in returned_ids:
+                    duplicate_ids.append(result_id)
+                    continue
+
+                # Enforce provenance consistency with the configured model.
                 result['translation_source'] = MODEL_SOURCE
                 result['meaning_source'] = MODEL_SOURCE
-            
-            # Validate that Gemini didn't drop or hallucinate items
-            if len(ai_results) != len(proverbs_batch):
-                print(f"WARNING: Sent {len(proverbs_batch)} items but received {len(ai_results)} back. Continuing anyway with matched items.")
-                
-            return ai_results
+
+                validated_results.append(result)
+                returned_ids.add(result_id)
+
+            if unknown_ids:
+                preview = unknown_ids[:10]
+                print(f"WARNING: Ignoring {len(unknown_ids)} unexpected response item(s) with unknown IDs/items: {preview}")
+
+            if duplicate_ids:
+                preview = duplicate_ids[:10]
+                print(f"WARNING: Ignoring {len(duplicate_ids)} duplicate response item(s) for IDs: {preview}")
+
+            missing_ids = sorted(expected_ids - returned_ids)
+            if missing_ids:
+                preview = missing_ids[:10]
+                print(f"ERROR: Gemini response is missing {len(missing_ids)} expected ID(s): {preview}. Failing batch to avoid partial/corrupt updates.")
+                return None
+
+            if not validated_results:
+                print("Error: No valid items remained after response validation. Failing batch.")
+                return None
+
+            return validated_results
             
         except Exception as e:
             error_msg = str(e)
