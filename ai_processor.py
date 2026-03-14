@@ -37,7 +37,7 @@ Your task is to analyze each proverb and return a strictly formatted JSON array 
 
 For each ID provided, you must return an object with the following structure:
 [
-  {
+    {{
     "id": <the original number id provided>,
     "english_translation": "The direct, accurate translation into English",
     "amharic_meaning": "The deeper meaning or context of the proverb explained in Amharic",
@@ -46,7 +46,7 @@ For each ID provided, you must return an object with the following structure:
         "meaning_source": "{MODEL_SOURCE}",
     "confidence": 0.95,
     "needs_review": 0.0
-  }
+    }}
 ]
 The `confidence` score should be a float between 0.0 (utterly unsure) and 1.0 (perfectly confident).
 If you find a proverb confusing or ambiguous, lower the confidence score and set `needs_review` to 1.0.
