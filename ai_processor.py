@@ -1,8 +1,10 @@
 import os
 import time
 import json
+from typing import TypedDict
 from dotenv import load_dotenv
 import google.generativeai as genai
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from database import get_unprocessed_proverbs, update_proverbs_ai_data
 
@@ -23,6 +25,29 @@ def model_name_to_source(model_name):
     return f"Gemini {model_name.replace('-', ' ').title()}"
 
 MODEL_SOURCE = model_name_to_source(MODEL_NAME)
+
+class ProverbResultResponse(TypedDict):
+    id: int
+    english_translation: str
+    amharic_meaning: str
+    english_meaning: str
+    translation_source: str
+    meaning_source: str
+    confidence: float
+    needs_review: float
+
+
+class ProverbResultModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    english_translation: str
+    amharic_meaning: str
+    english_meaning: str
+    translation_source: str
+    meaning_source: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    needs_review: float = Field(ge=0.0, le=1.0)
 
 BATCH_SIZE = 50
 TARGET_RPM = 15
@@ -71,12 +96,17 @@ def process_batch(proverbs_batch):
         response = model.generate_content(
             prompt,
             generation_config=genai.GenerationConfig(
-                response_mime_type="application/json"
+                response_mime_type="application/json",
+                response_schema=list[ProverbResultResponse],
             )
         )
 
         # Parse the JSON string Gemini returns
-        ai_results = json.loads(response.text)
+        try:
+            ai_results = json.loads(response.text)
+        except json.JSONDecodeError as e:
+            print(f"Error: Gemini returned invalid JSON. Failing batch. Details: {e}")
+            return None
 
         if not isinstance(ai_results, list):
             print("Error: Gemini response is not a JSON array. Failing batch.")
@@ -87,10 +117,10 @@ def process_batch(proverbs_batch):
         unknown_ids = []
         duplicate_ids = []
 
-        for result in ai_results:
+        for index, result in enumerate(ai_results):
             if not isinstance(result, dict):
-                unknown_ids.append("<non-object-item>")
-                continue
+                print(f"ERROR: Gemini response item at index {index} is not an object. Failing batch.")
+                return None
 
             result_id = result.get('id')
             if isinstance(result_id, str):
@@ -112,8 +142,17 @@ def process_batch(proverbs_batch):
             result['translation_source'] = MODEL_SOURCE
             result['meaning_source'] = MODEL_SOURCE
 
-            validated_results.append(result)
-            returned_ids.add(result_id)
+            try:
+                validated = ProverbResultModel.model_validate(result)
+            except ValidationError as e:
+                print(
+                    f"ERROR: Schema validation failed for response item at index {index} "
+                    f"(id={result_id}). Failing batch. Details: {e}"
+                )
+                return None
+
+            validated_results.append(validated.model_dump())
+            returned_ids.add(validated.id)
 
         if unknown_ids:
             preview = unknown_ids[:10]
