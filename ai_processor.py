@@ -16,13 +16,20 @@ if not api_key:
 
 genai.configure(api_key=api_key)
 
-# We use gemini-1.5-flash to bypass the aggressive free-tier rate limits of 2.5-pro.
-model = genai.GenerativeModel("gemini-2.5-flash") 
+MODEL_NAME = "gemini-2.5-flash"
+
+def model_name_to_source(model_name):
+    if model_name.startswith("gemini-"):
+        model_name = model_name[len("gemini-"):]
+    return f"Gemini {model_name.replace('-', ' ').title()}"
+
+MODEL_SOURCE = model_name_to_source(MODEL_NAME)
+model = genai.GenerativeModel(MODEL_NAME)
 
 BATCH_SIZE = 50
 SLEEP_TIME_SECONDS = 4 # Wait 4s to stay under 15 RPM limit
 
-SYSTEM_INSTRUCTION = """
+SYSTEM_INSTRUCTION = f"""
 You are an expert translator specializing in Amharic proverbs and idioms. 
 You will be provided with a JSON array containing pairs of IDs and raw Amharic proverbs.
 Your task is to analyze each proverb and return a strictly formatted JSON array containing the translation and meanings. 
@@ -34,8 +41,8 @@ For each ID provided, you must return an object with the following structure:
     "english_translation": "The direct, accurate translation into English",
     "amharic_meaning": "The deeper meaning or context of the proverb explained in Amharic",
     "english_meaning": "The deeper meaning or context of the proverb explained in English",
-    "translation_source": "Gemini 1.5 Flash",
-    "meaning_source": "Gemini 1.5 Flash",
+        "translation_source": "{MODEL_SOURCE}",
+        "meaning_source": "{MODEL_SOURCE}",
     "confidence": 0.95,
     "needs_review": 0.0
   }
@@ -66,6 +73,11 @@ def process_batch(proverbs_batch):
             
             # Parse the JSON string Gemini returns
             ai_results = json.loads(response.text)
+
+            # Enforce provenance consistency with the configured model.
+            for result in ai_results:
+                result['translation_source'] = MODEL_SOURCE
+                result['meaning_source'] = MODEL_SOURCE
             
             # Validate that Gemini didn't drop or hallucinate items
             if len(ai_results) != len(proverbs_batch):
