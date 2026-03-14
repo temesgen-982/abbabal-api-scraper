@@ -3,6 +3,7 @@ import time
 import json
 from dotenv import load_dotenv
 import google.generativeai as genai
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from database import get_unprocessed_proverbs, update_proverbs_ai_data
 
@@ -23,7 +24,31 @@ def model_name_to_source(model_name):
     return f"Gemini {model_name.replace('-', ' ').title()}"
 
 MODEL_SOURCE = model_name_to_source(MODEL_NAME)
-model = genai.GenerativeModel(MODEL_NAME)
+
+
+class ProverbResultModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    english_translation: str
+    amharic_meaning: str
+    english_meaning: str
+    translation_source: str
+    meaning_source: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    needs_review: float = Field(ge=0.0, le=1.0)
+
+
+def build_response_schema(model_class):
+    item_schema = model_class.model_json_schema()
+    item_schema.pop("title", None)
+    return {
+        "type": "array",
+        "items": item_schema,
+    }
+
+
+RESPONSE_SCHEMA = build_response_schema(ProverbResultModel)
 
 BATCH_SIZE = 50
 TARGET_RPM = 15
@@ -53,6 +78,11 @@ If you find a proverb confusing or ambiguous, lower the confidence score and set
 CRITICAL: Do not hallucinate new IDs. Only return objects for the IDs provided in the input array.
 """
 
+model = genai.GenerativeModel(
+    MODEL_NAME,
+    system_instruction=SYSTEM_INSTRUCTION,
+)
+
 def process_batch(proverbs_batch):
     print(f"Sending batch of {len(proverbs_batch)} proverbs to Gemini...")
     expected_ids = {p['id'] for p in proverbs_batch}
@@ -60,91 +90,99 @@ def process_batch(proverbs_batch):
     # Prepare the payload (just IDs and the text to save tokens)
     payload = [{"id": p['id'], "text": p['text']} for p in proverbs_batch]
     
-    prompt = f"{SYSTEM_INSTRUCTION}\n\nHere is the input array:\n{json.dumps(payload, ensure_ascii=False)}"
+    prompt = f"Here is the input array:\n{json.dumps(payload, ensure_ascii=False)}"
     
-    try_count = 0
-    while True:
-        try:
-            # We enforce a strict JSON application response format
-            response = model.generate_content(
-                prompt,
-                generation_config=genai.GenerationConfig(
-                    response_mime_type="application/json"
-                )
+    try:
+        # We enforce a strict JSON application response format
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json",
+                response_schema=RESPONSE_SCHEMA,
             )
-            
-            # Parse the JSON string Gemini returns
+        )
+
+        # Parse the JSON string Gemini returns
+        try:
             ai_results = json.loads(response.text)
+        except json.JSONDecodeError as e:
+            print(f"Error: Gemini returned invalid JSON. Failing batch. Details: {e}")
+            return None
 
-            if not isinstance(ai_results, list):
-                print("Error: Gemini response is not a JSON array. Failing batch.")
+        if not isinstance(ai_results, list):
+            print("Error: Gemini response is not a JSON array. Failing batch.")
+            return None
+
+        validated_results = []
+        returned_ids = set()
+        unknown_ids = []
+        duplicate_ids = []
+
+        for index, result in enumerate(ai_results):
+            if not isinstance(result, dict):
+                print(f"ERROR: Gemini response item at index {index} is not an object. Failing batch.")
                 return None
 
-            validated_results = []
-            returned_ids = set()
-            unknown_ids = []
-            duplicate_ids = []
+            result_id = result.get('id')
+            if isinstance(result_id, str):
+                try:
+                    result_id = int(result_id)
+                    result['id'] = result_id
+                except ValueError:
+                    pass
 
-            for result in ai_results:
-                if not isinstance(result, dict):
-                    unknown_ids.append("<non-object-item>")
-                    continue
+            if result_id not in expected_ids:
+                unknown_ids.append(result_id)
+                continue
 
-                result_id = result.get('id')
-                if isinstance(result_id, str):
-                    try:
-                        result_id = int(result_id)
-                        result['id'] = result_id
-                    except ValueError:
-                        pass
+            if result_id in returned_ids:
+                duplicate_ids.append(result_id)
+                continue
 
-                if result_id not in expected_ids:
-                    unknown_ids.append(result_id)
-                    continue
+            # Enforce provenance consistency with the configured model.
+            result['translation_source'] = MODEL_SOURCE
+            result['meaning_source'] = MODEL_SOURCE
 
-                if result_id in returned_ids:
-                    duplicate_ids.append(result_id)
-                    continue
-
-                # Enforce provenance consistency with the configured model.
-                result['translation_source'] = MODEL_SOURCE
-                result['meaning_source'] = MODEL_SOURCE
-
-                validated_results.append(result)
-                returned_ids.add(result_id)
-
-            if unknown_ids:
-                preview = unknown_ids[:10]
-                print(f"WARNING: Ignoring {len(unknown_ids)} unexpected response item(s) with unknown IDs/items: {preview}")
-
-            if duplicate_ids:
-                preview = duplicate_ids[:10]
-                print(f"WARNING: Ignoring {len(duplicate_ids)} duplicate response item(s) for IDs: {preview}")
-
-            missing_ids = sorted(expected_ids - returned_ids)
-            if missing_ids:
-                preview = missing_ids[:10]
-                print(f"ERROR: Gemini response is missing {len(missing_ids)} expected ID(s): {preview}. Failing batch to avoid partial/corrupt updates.")
+            try:
+                validated = ProverbResultModel.model_validate(result)
+            except ValidationError as e:
+                print(
+                    f"ERROR: Schema validation failed for response item at index {index} "
+                    f"(id={result_id}). Failing batch. Details: {e}"
+                )
                 return None
 
-            if not validated_results:
-                print("Error: No valid items remained after response validation. Failing batch.")
-                return None
+            validated_results.append(validated.model_dump())
+            returned_ids.add(validated.id)
 
-            return validated_results
-            
-        except Exception as e:
-            error_msg = str(e)
-            if "429" in error_msg or "Quota exceeded" in error_msg:
-                print(f"\n[RATE LIMIT HIT] Google API requested a pause. Sleeping for 60 seconds before retrying this batch...")
-                time.sleep(60)
-                try_count += 1
-                if try_count > 5:
-                    print("Failed after 5 rate limit retries. Aborting.")
-                    return None
-            else:
-                print(f"Error calling Gemini API: {e}")
-                return None
+        if unknown_ids:
+            preview = unknown_ids[:10]
+            print(f"WARNING: Ignoring {len(unknown_ids)} unexpected response item(s) with unknown IDs/items: {preview}")
+
+        if duplicate_ids:
+            preview = duplicate_ids[:10]
+            print(f"WARNING: Ignoring {len(duplicate_ids)} duplicate response item(s) for IDs: {preview}")
+
+        missing_ids = sorted(expected_ids - returned_ids)
+        if missing_ids:
+            preview = missing_ids[:10]
+            print(f"ERROR: Gemini response is missing {len(missing_ids)} expected ID(s): {preview}. Failing batch to avoid partial/corrupt updates.")
+            return None
+
+        if not validated_results:
+            print("Error: No valid items remained after response validation. Failing batch.")
+            return None
+
+        return validated_results
+
+    except Exception as e:
+        error_msg = str(e)
+        if "429" in error_msg or "Quota exceeded" in error_msg:
+            print("[RATE LIMIT HIT] Quota/rate-limit error returned by Gemini. Stopping this run immediately.")
+            return None
+
+        print(f"Error calling Gemini API: {e}")
+        return None
 
 def main():
     print("Starting AI augmentation processor...")
